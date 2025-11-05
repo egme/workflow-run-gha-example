@@ -212,9 +212,13 @@ permissions:
 **Key Settings**:
 ```yaml
 if: ${{ github.event.workflow_run.conclusion == 'success' }}
+permissions:
+  statuses: write   # Required to post commit status to PR
+  contents: read    # Required to checkout repository
 ```
 - Only runs if the Generate Files workflow succeeded
 - Checks out the correct branch using `github.event.workflow_run.head_branch`
+- Uses `statuses: write` permission to post commit status back to the PR
 
 ## 🧪 Testing Scripts Locally
 
