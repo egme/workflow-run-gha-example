@@ -93,17 +93,20 @@ on:
 ```
 
 **Process**:
-1. Reports commit status as "pending" to the PR
-2. Checks out the branch from the completed workflow run
-3. Validates each file in `generated/`:
+1. Creates a check run named "CI Validation" (visible in PR checks)
+2. Finds the PR associated with the workflow run
+3. Posts a comment showing CI validation is in progress
+4. Checks out the branch from the completed workflow run
+5. Validates each file in `generated/`:
    - Extracts MD5 hash from filename
    - Calculates actual MD5 hash of file content
    - Compares the two hashes
-4. Checks correspondence between source and generated files
-5. Reports validation results
-6. Updates commit status to "success" or "failure"
+6. Checks correspondence between source and generated files
+7. Reports validation results in GitHub Actions summary
+8. Updates the check run with pass/fail conclusion
+9. Updates the PR comment with detailed results
 
-**Important Note**: Workflows triggered by `workflow_run` don't automatically appear in PR checks. We use the GitHub API (`actions/github-script`) to explicitly report the commit status back to the PR, making the CI results visible in the PR's status checks.
+**Important Note**: This workflow uses the GitHub Checks API to create a check run that appears in PR checks and can be required by branch protection rules. It also posts comments for additional visibility.
 
 **Validation Checks**:
 - ✅ MD5 hash in filename matches actual file content
@@ -192,6 +195,40 @@ Navigate to the **Actions** tab in your GitHub repository to see:
 - Improved maintainability and readability
 - Scripts are version controlled and executable
 
+## 🔒 Branch Protection Rules
+
+To require the CI validation to pass before merging:
+
+1. Go to **Settings** → **Branches** → **Branch protection rules**
+2. Add a rule for your main branch (e.g., `main`)
+3. Enable **"Require status checks to pass before merging"**
+4. Search for and select **"CI Validation"** in the status checks list
+5. Optionally enable:
+   - **"Require branches to be up to date before merging"**
+   - **"Require approval before merging"**
+
+### Important Notes:
+
+- The check run is named **"CI Validation"** (defined in the workflow)
+- It will appear in the status checks list after it runs at least once
+- The check uses the Checks API (`github.rest.checks.create/update`) which properly integrates with branch protection
+- Branch protection will prevent merging if the CI validation fails
+
+### Example Configuration:
+
+```yaml
+# In your workflow (already configured)
+- name: Create check run
+  uses: actions/github-script@v7
+  with:
+    script: |
+      await github.rest.checks.create({
+        name: 'CI Validation',  # This name appears in branch protection
+        head_sha: '${{ github.event.workflow_run.head_sha }}',
+        status: 'in_progress'
+      })
+```
+
 ## 🛠️ Configuration
 
 ### Generate Files Workflow
@@ -213,12 +250,13 @@ permissions:
 ```yaml
 if: ${{ github.event.workflow_run.conclusion == 'success' }}
 permissions:
-  statuses: write   # Required to post commit status to PR
-  contents: read    # Required to checkout repository
+  pull-requests: write  # Required to post comments on PR
+  contents: read        # Required to checkout repository
+  checks: write         # Required for workflow checks
 ```
 - Only runs if the Generate Files workflow succeeded
 - Checks out the correct branch using `github.event.workflow_run.head_branch`
-- Uses `statuses: write` permission to post commit status back to the PR
+- Uses `pull-requests: write` permission to post/update comments on the PR
 
 ## 🧪 Testing Scripts Locally
 
@@ -296,25 +334,33 @@ on:
 
 ## 🐛 Troubleshooting
 
-### CI Status Not Showing in PR
+### CI Check Not Appearing in Branch Protection
 
-**Problem**: CI workflow runs but doesn't appear in PR checks
+**Problem**: The "CI Validation" check doesn't appear in the branch protection status checks list
 
-**Solution**: This is the expected behavior for `workflow_run` triggered workflows. The fix is already implemented using `actions/github-script` to post commit statuses. The workflow explicitly reports its status using the GitHub API:
+**Solution**: 
+1. The check must run at least once before it appears in the list
+2. Make sure the workflow has `checks: write` permission
+3. The check name must match exactly: "CI Validation"
 
-```yaml
-- name: Report CI status as pending
-  uses: actions/github-script@v7
-  with:
-    script: |
-      github.rest.repos.createCommitStatus({
-        sha: '${{ github.event.workflow_run.head_sha }}',
-        state: 'pending',
-        context: 'CI / validate'
-      })
-```
+After the workflow runs once, go to:
+- **Settings** → **Branches** → **Branch protection rules**
+- Edit your rule and search for "CI Validation"
+- It should now appear in the searchable status checks
 
-This creates a visible check in the PR with the status of the CI validation.
+### CI Check Shows as "Expected" But Never Updates
+
+**Problem**: The check appears as "Expected — Waiting for status to be reported"
+
+**Solution**: This workflow uses the Checks API (not commit status API) which properly reports results. Make sure:
+1. The workflow has `checks: write` permission (already configured)
+2. The `head_sha` is correct (uses `github.event.workflow_run.head_sha`)
+3. The workflow completes successfully (check the Actions tab)
+
+The workflow creates and updates a check run that will show:
+- ⏳ In Progress - While validating
+- ✅ Success - All validations passed  
+- ❌ Failure - Validations failed
 
 ### Workflow Not Triggering
 
@@ -370,6 +416,31 @@ This pattern is useful for:
 - **Linting**: Auto-fixing code style
 - **Localization**: Updating translation files
 - **Build Artifacts**: Generating build outputs
+
+## 🎯 Why This Pattern Works
+
+### The Challenge
+When a workflow pushes changes to a PR (like auto-generated files), GitHub won't trigger other workflows on that PR using `GITHUB_TOKEN`. This prevents:
+- Running CI on the auto-generated files
+- Validating the generated content
+- Requiring checks to pass before merge
+
+### The Solution
+This repository demonstrates the complete solution:
+
+1. **`workflow_run` Trigger**: The CI workflow triggers when "Generate Files" completes, not on PR events
+2. **Checks API**: Creates a proper check run that integrates with branch protection
+3. **Visibility**: Posts PR comments for human-readable results
+4. **Branch Protection**: The check can be required for merging
+
+### Key Differences from Standard Workflows
+
+| Standard Workflow | This Pattern |
+|-------------------|--------------|
+| Triggers on PR events | Triggers on workflow completion |
+| Automatic check reporting | Manual check creation via API |
+| Direct branch context | Need to find PR and get SHA |
+| Standard permissions | Needs `checks: write` permission |
 
 ---
 
