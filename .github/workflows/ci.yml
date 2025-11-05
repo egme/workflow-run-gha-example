@@ -17,16 +17,33 @@ jobs:
       checks: write
 
     steps:
+      - name: Get latest commit SHA from branch
+        id: get_sha
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Get the latest commit from the branch (after files were generated)
+            const branch = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: '${{ github.event.workflow_run.head_branch }}'
+            });
+            const latestSha = branch.data.commit.sha;
+            core.setOutput('sha', latestSha);
+            console.log(`Latest commit SHA on branch: ${latestSha}`);
+            return latestSha;
+
       - name: Create check run
         id: check
         uses: actions/github-script@v7
         with:
           script: |
+            const headSha = '${{ steps.get_sha.outputs.sha }}';
             const check = await github.rest.checks.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               name: 'CI Validation',
-              head_sha: '${{ github.event.workflow_run.head_sha }}',
+              head_sha: headSha,
               status: 'in_progress',
               started_at: new Date().toISOString(),
               output: {
@@ -36,6 +53,7 @@ jobs:
               }
             });
             core.setOutput('check_id', check.data.id);
+            console.log(`Created check run ${check.data.id} for commit ${headSha}`);
             return check.data.id;
 
       - name: Get PR number

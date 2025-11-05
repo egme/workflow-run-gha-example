@@ -93,20 +93,23 @@ on:
 ```
 
 **Process**:
-1. Creates a check run named "CI Validation" (visible in PR checks)
-2. Finds the PR associated with the workflow run
-3. Posts a comment showing CI validation is in progress
-4. Checks out the branch from the completed workflow run
-5. Validates each file in `generated/`:
+1. Gets the latest commit SHA from the branch (after files were generated)
+2. Creates a check run named "CI Validation" using the latest SHA
+3. Finds the PR associated with the workflow run
+4. Posts a comment showing CI validation is in progress
+5. Checks out the branch from the completed workflow run
+6. Validates each file in `generated/`:
    - Extracts MD5 hash from filename
    - Calculates actual MD5 hash of file content
    - Compares the two hashes
-6. Checks correspondence between source and generated files
-7. Reports validation results in GitHub Actions summary
-8. Updates the check run with pass/fail conclusion
-9. Updates the PR comment with detailed results
+7. Checks correspondence between source and generated files
+8. Reports validation results in GitHub Actions summary
+9. Updates the check run with pass/fail conclusion
+10. Updates the PR comment with detailed results
 
-**Important Note**: This workflow uses the GitHub Checks API to create a check run that appears in PR checks and can be required by branch protection rules. It also posts comments for additional visibility.
+**Important Note**: This workflow uses the GitHub Checks API to create a check run that appears in PR checks and can be required by branch protection rules. 
+
+**Critical Detail**: The workflow fetches the latest commit SHA from the branch because `github.event.workflow_run.head_sha` points to the commit that *triggered* the generation workflow, not the commit *after* generated files were pushed. We need the SHA of the commit with the generated files.
 
 **Validation Checks**:
 - ✅ MD5 hash in filename matches actual file content
@@ -218,13 +221,25 @@ To require the CI validation to pass before merging:
 
 ```yaml
 # In your workflow (already configured)
+- name: Get latest commit SHA from branch
+  id: get_sha
+  uses: actions/github-script@v7
+  with:
+    script: |
+      const branch = await github.rest.repos.getBranch({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        branch: '${{ github.event.workflow_run.head_branch }}'
+      });
+      core.setOutput('sha', branch.data.commit.sha);
+
 - name: Create check run
   uses: actions/github-script@v7
   with:
     script: |
       await github.rest.checks.create({
         name: 'CI Validation',  # This name appears in branch protection
-        head_sha: '${{ github.event.workflow_run.head_sha }}',
+        head_sha: '${{ steps.get_sha.outputs.sha }}',  # Latest commit!
         status: 'in_progress'
       })
 ```
@@ -352,10 +367,26 @@ After the workflow runs once, go to:
 
 **Problem**: The check appears as "Expected — Waiting for status to be reported"
 
-**Solution**: This workflow uses the Checks API (not commit status API) which properly reports results. Make sure:
-1. The workflow has `checks: write` permission (already configured)
-2. The `head_sha` is correct (uses `github.event.workflow_run.head_sha`)
-3. The workflow completes successfully (check the Actions tab)
+**Solution**: This workflow uses the Checks API (not commit status API) which properly reports results. The most common issue is using the wrong commit SHA.
+
+**Key Fix**: The workflow gets the latest commit SHA from the branch:
+```yaml
+- name: Get latest commit SHA from branch
+  uses: actions/github-script@v7
+  with:
+    script: |
+      const branch = await github.rest.repos.getBranch({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        branch: '${{ github.event.workflow_run.head_branch }}'
+      });
+      return branch.data.commit.sha;
+```
+
+Why this matters:
+- `github.event.workflow_run.head_sha` = commit that **triggered** the workflow (BEFORE generation)
+- `branch.data.commit.sha` = latest commit on branch (AFTER generation)
+- The check must be on the commit with the generated files (the newer one)
 
 The workflow creates and updates a check run that will show:
 - ⏳ In Progress - While validating
