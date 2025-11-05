@@ -17,6 +17,27 @@ jobs:
       checks: write
 
     steps:
+      - name: Create check run
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const check = await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'CI Validation',
+              head_sha: '${{ github.event.workflow_run.head_sha }}',
+              status: 'in_progress',
+              started_at: new Date().toISOString(),
+              output: {
+                title: 'CI Validation',
+                summary: 'Validating generated files...',
+                text: 'Checking MD5 checksums and file correspondence.'
+              }
+            });
+            core.setOutput('check_id', check.data.id);
+            return check.data.id;
+
       - name: Get PR number
         id: pr
         uses: actions/github-script@v7
@@ -100,71 +121,95 @@ jobs:
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
         run: .github/scripts/ci-summary.sh
 
-      - name: Post CI result comment
-        if: always() && steps.pr.outputs.found == 'true'
+      - name: Update check run and post comment
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const prNumber = ${{ steps.pr.outputs.number }};
+            const checkId = ${{ steps.check.outputs.check_id }};
             const runUrl = 'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}';
             const status = '${{ job.status }}';
             const validationStatus = '${{ steps.validate.outputs.validation_status }}';
             
-            let emoji, statusText, details;
+            let conclusion, emoji, statusText, details;
             if (status === 'success') {
+              conclusion = 'success';
               emoji = '✅';
               statusText = 'PASSED';
               details = 'All validations completed successfully!';
             } else if (status === 'failure') {
+              conclusion = 'failure';
               emoji = '❌';
               statusText = 'FAILED';
               details = 'Some validations failed. Please check the workflow logs for details.';
             } else {
+              conclusion = 'cancelled';
               emoji = '⚠️';
               statusText = 'COMPLETED WITH ISSUES';
               details = 'The workflow completed but with some issues.';
             }
             
-            const body = `## 🔍 CI Validation
-            
-            ${emoji} **Status:** ${statusText}
-            
-            ${details}
-            
-            ### Validation Results:
-            - **MD5 Checksum Validation:** ${validationStatus === 'passed' ? '✅ Passed' : '❌ Failed'}
-            - **Source/Generated Correspondence:** ${status === 'success' ? '✅ Passed' : '❌ Check logs'}
-            
-            🔗 [View detailed workflow run](${runUrl})
-            
-            ---
-            *Updated at: ${new Date().toISOString()}*`;
-            
-            // Find and update existing comment
-            const comments = await github.rest.issues.listComments({
+            // Update the check run
+            await github.rest.checks.update({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: prNumber
+              check_run_id: checkId,
+              status: 'completed',
+              conclusion: conclusion,
+              completed_at: new Date().toISOString(),
+              output: {
+                title: `CI Validation: ${statusText}`,
+                summary: details,
+                text: `### Validation Results:\n\n` +
+                      `- **MD5 Checksum Validation:** ${validationStatus === 'passed' ? '✅ Passed' : '❌ Failed'}\n` +
+                      `- **Source/Generated Correspondence:** ${status === 'success' ? '✅ Passed' : '❌ Check logs'}\n\n` +
+                      `[View detailed workflow run](${runUrl})`
+              }
             });
             
-            const botComment = comments.data.find(comment => 
-              comment.user.type === 'Bot' && 
-              comment.body.includes('## 🔍 CI Validation')
-            );
-            
-            if (botComment) {
-              await github.rest.issues.updateComment({
+            // Also post/update PR comment for visibility
+            const prNumber = '${{ steps.pr.outputs.number }}';
+            if (prNumber && prNumber !== '') {
+              const body = `## 🔍 CI Validation
+              
+              ${emoji} **Status:** ${statusText}
+              
+              ${details}
+              
+              ### Validation Results:
+              - **MD5 Checksum Validation:** ${validationStatus === 'passed' ? '✅ Passed' : '❌ Failed'}
+              - **Source/Generated Correspondence:** ${status === 'success' ? '✅ Passed' : '❌ Check logs'}
+              
+              🔗 [View detailed workflow run](${runUrl})
+              
+              ---
+              *Updated at: ${new Date().toISOString()}*`;
+              
+              const comments = await github.rest.issues.listComments({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: body
+                issue_number: parseInt(prNumber)
               });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body: body
-              });
+              
+              const botComment = comments.data.find(comment => 
+                comment.user.type === 'Bot' && 
+                comment.body.includes('## 🔍 CI Validation')
+              );
+              
+              if (botComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComment.id,
+                  body: body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: parseInt(prNumber),
+                  body: body
+                });
+              }
             }
 
