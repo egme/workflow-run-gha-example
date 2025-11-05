@@ -6,9 +6,6 @@ echo "🔄 Generating files from sources..."
 # Create generated directory if it doesn't exist
 mkdir -p generated
 
-# Remove old generated files
-rm -f generated/*
-
 # Process each markdown file in sources
 for source_file in sources/*.md; do
   if [ -f "$source_file" ]; then
