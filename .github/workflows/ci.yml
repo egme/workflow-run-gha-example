@@ -13,6 +13,20 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     steps:
+      - name: Report CI status as pending
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: '${{ github.event.workflow_run.head_sha }}',
+              state: 'pending',
+              target_url: 'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}',
+              description: 'Validating generated files...',
+              context: 'CI / validate'
+            })
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -32,4 +46,34 @@ jobs:
           VALIDATION_STATUS: ${{ steps.validate.outputs.validation_status }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
         run: .github/scripts/ci-summary.sh
+
+      - name: Report CI status as success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: '${{ github.event.workflow_run.head_sha }}',
+              state: 'success',
+              target_url: 'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}',
+              description: 'All validations passed',
+              context: 'CI / validate'
+            })
+
+      - name: Report CI status as failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: '${{ github.event.workflow_run.head_sha }}',
+              state: 'failure',
+              target_url: 'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}',
+              description: 'Validation failed',
+              context: 'CI / validate'
+            })
 
