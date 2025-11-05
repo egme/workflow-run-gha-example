@@ -93,17 +93,18 @@ on:
 ```
 
 **Process**:
-1. Reports commit status as "pending" to the PR
-2. Checks out the branch from the completed workflow run
-3. Validates each file in `generated/`:
+1. Finds the PR associated with the workflow run
+2. Posts a comment showing CI validation is in progress
+3. Checks out the branch from the completed workflow run
+4. Validates each file in `generated/`:
    - Extracts MD5 hash from filename
    - Calculates actual MD5 hash of file content
    - Compares the two hashes
-4. Checks correspondence between source and generated files
-5. Reports validation results
-6. Updates commit status to "success" or "failure"
+5. Checks correspondence between source and generated files
+6. Reports validation results in GitHub Actions summary
+7. Updates the PR comment with pass/fail results and link to workflow run
 
-**Important Note**: Workflows triggered by `workflow_run` don't automatically appear in PR checks. We use the GitHub API (`actions/github-script`) to explicitly report the commit status back to the PR, making the CI results visible in the PR's status checks.
+**Important Note**: Workflows triggered by `workflow_run` don't automatically appear in PR checks. This workflow posts a comment to the PR with the validation results, making it easy to see the CI status directly in the PR conversation.
 
 **Validation Checks**:
 - ✅ MD5 hash in filename matches actual file content
@@ -213,12 +214,13 @@ permissions:
 ```yaml
 if: ${{ github.event.workflow_run.conclusion == 'success' }}
 permissions:
-  statuses: write   # Required to post commit status to PR
-  contents: read    # Required to checkout repository
+  pull-requests: write  # Required to post comments on PR
+  contents: read        # Required to checkout repository
+  checks: write         # Required for workflow checks
 ```
 - Only runs if the Generate Files workflow succeeded
 - Checks out the correct branch using `github.event.workflow_run.head_branch`
-- Uses `statuses: write` permission to post commit status back to the PR
+- Uses `pull-requests: write` permission to post/update comments on the PR
 
 ## 🧪 Testing Scripts Locally
 
@@ -296,25 +298,33 @@ on:
 
 ## 🐛 Troubleshooting
 
-### CI Status Not Showing in PR
+### CI Status Not Showing in PR Checks
 
-**Problem**: CI workflow runs but doesn't appear in PR checks
+**Problem**: CI workflow runs but doesn't appear in PR status checks
 
-**Solution**: This is the expected behavior for `workflow_run` triggered workflows. The fix is already implemented using `actions/github-script` to post commit statuses. The workflow explicitly reports its status using the GitHub API:
+**Solution**: This is the expected behavior for `workflow_run` triggered workflows. Instead of trying to force status checks (which have limitations), this workflow posts comments directly to the PR with the validation results.
 
-```yaml
-- name: Report CI status as pending
-  uses: actions/github-script@v7
-  with:
-    script: |
-      github.rest.repos.createCommitStatus({
-        sha: '${{ github.event.workflow_run.head_sha }}',
-        state: 'pending',
-        context: 'CI / validate'
-      })
+The workflow:
+1. Finds the PR associated with the branch
+2. Posts/updates a comment with the CI results
+3. Includes links to the full workflow run
+
+This approach is more reliable and provides better visibility than commit statuses for `workflow_run` triggered workflows.
+
+**Example Comment**:
+```markdown
+## 🔍 CI Validation
+
+✅ **Status:** PASSED
+
+All validations completed successfully!
+
+### Validation Results:
+- **MD5 Checksum Validation:** ✅ Passed
+- **Source/Generated Correspondence:** ✅ Passed
+
+🔗 [View detailed workflow run](...)
 ```
-
-This creates a visible check in the PR with the status of the CI validation.
 
 ### Workflow Not Triggering
 
