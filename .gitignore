@@ -1,0 +1,21 @@
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary Files
+*.tmp
+*.bak
+.cache/
+
+# Generated files are tracked (they're part of the demo)
+# but you might want to ignore them in real projects:
+# generated/*
+# !generated/.gitkeep
+
