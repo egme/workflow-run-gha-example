@@ -31,6 +31,3 @@ Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil 
 ## Chapter 3: Summary
 
 Omnis dolor repellendus. Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae.
-
-**End of Document**
-
